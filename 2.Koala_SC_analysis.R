@@ -225,26 +225,26 @@ init <-  function() {  list(sigma=rnorm(1,10), lam0=runif(1) , z=rep(1,dat$M)) }
 ###--- Run uninformative model
 model = "KUI1"
 StudyArea_KUI1 <- fn.run_JAGS_model(StudyArea = StudyArea, model = model)
-save(StudyArea_KUI1, file=paste(StudyArea,"_",Year,"_",model,".RData", sep=""), compress=TRUE)
+save(StudyArea_KUI1, file=paste("out/",StudyArea,"_",Year,"_",model,".RData", sep=""), compress=TRUE)
 
 ###--- Run regional weakly informative model; weakly informative HR 4-863; WIA1 = dgamma = 4,1
 model = "KWI1"
 StudyArea_KWI1 <- fn.run_JAGS_model(StudyArea = StudyArea, model = model)
-save(StudyArea_KWI1, file=paste(StudyArea,"_",Year,"_",model,".RData", sep=""), compress=TRUE)
+save(StudyArea_KWI1, file=paste("out/",StudyArea,"_",Year,"_",model,".RData", sep=""), compress=TRUE)
 
 ###--- Run study area weakly informative model; weakly informative 10-90; WI2 = dgamma = 10,4.6
 model = "KWI2"
 StudyArea_KWI2 <- fn.run_JAGS_model(StudyArea = StudyArea, model = model)
-save(StudyArea_KWI2, file=paste(StudyArea,"_",Year,"_",model,".RData", sep=""), compress=TRUE)
+save(StudyArea_KWI2, file=paste("out/",StudyArea,"_",Year,"_",model,".RData", sep=""), compress=TRUE)
 
 ###--- Run strongly informative model; weakly informative HR 4-863; WIA1 = dgamma = 4,1
 model = "KSI1"
 StudyArea_KSI1 <- fn.run_JAGS_model(StudyArea = StudyArea, model = model)
-save(StudyArea_KSI1, file=paste(StudyArea,"_",Year,"_",model,".RData", sep=""), compress=TRUE)
+save(StudyArea_KSI1, file=paste("out/",StudyArea,"_",Year,"_",model,".RData", sep=""), compress=TRUE)
 
 #############################################################
 # run model to create map
 model = "KSI1" # assuming going with strongest prior for final model and density map - if not change here and in code below
 StudyArea_KSI1_map <- fn.run_JAGS_model_map(StudyArea = StudyArea, model = model, pars_map = pars_map)
-save(StudyArea_KSI1_map, file=paste(StudyArea,"_",Year,"_",model,"_map.RData", sep=""), compress=TRUE)
+save(StudyArea_KSI1_map, file=paste("out/",StudyArea,"_",Year,"_",model,"_map.RData", sep=""), compress=TRUE)
 #############################################################

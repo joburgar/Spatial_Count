@@ -41,8 +41,9 @@ get_JAGS_output <- function(filename){
 
 ##################################################################################################
 ###---format and aggregate model data
-info.mc <- str_replace(info.mc, pattern = "_2020_", replacement = "_")
+info.mc <- str_replace(info, pattern = "_2020_", replacement = "_")
 info.mc <- str_replace(info.mc, pattern = "out/", replacement = "")
+info.mc <- str_replace(info.mc, pattern = ".RData", replacement = "")
 JAGS.output <- lapply(info.mc, function(i) get_JAGS_output(get(i)))
 JAGS.output <- do.call(rbind, JAGS.output)
 glimpse(JAGS.output)
