@@ -1,0 +1,384 @@
+---
+title: "Koala Spatial Count Modelling Prep"
+author: "Code written by Joanna Burgar"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  word_document: default
+editor_options:
+  chunk_output_type: console
+always_allow_html: yes
+---
+
+```{r setup, echo=F, include=F}
+
+#Load Packages
+list.of.packages <- c("leaflet", "camtrapR", "tidyverse", "readxl", "rgdal", "colortools", "mapview", "lubridate")
+
+# Check you have them and load them
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+lapply(list.of.packages, require, character.only = TRUE)
+
+# Timezone [can change to appropriate timezone, only matters if using temporal periods that overlap daylight savings and/or combining with other time data]
+tz <- "UTC"
+
+# Set a single catagorical variable of interest from station covariates (`eff`) for summary graphs
+category <- "StudyArea"
+
+# Define a colour from the R options to base the colourscheme
+colour <- "lightseagreen"
+
+## README FIRST ##
+#Read and run this chunk of code line by line - there are some question below which you will have to answer/ logic tests to complete. Once you are happy with this, hit 'knit' above. 
+
+# Load your data [change the files paths to your data effations]
+StudyArea <- "BCK"
+# StudyArea <- "BELK"
+
+Year <- 2020
+
+###--- Load the station call data and metadata
+# This part might require some data wrangling [feel free to reach out if the data isn't fitting]
+# It's imperative that dates/values are consistent throughout the file or data won't load properly
+# The script is set up assuming all data will be coming in the same format as BCK post-fire data
+# the only change from how I received the data is in the metadata as I added in survey effort
+
+
+# load call data
+# for post-fire BELK and BCK data note the change in Study area length for BELK vs BCK
+# assumes the call data is in the "data" subfolder, is an excel file called "BCK_UTM_2020.xlsx"
+dat <- read_excel(paste("data/",toupper(substr(StudyArea,1,4)),"_UTM_",Year,".xlsx", sep=""),sheet = paste(toupper(substr(StudyArea,1,4)),"_UTM", sep=""), na="NULL", col_types="text") %>% type_convert()
+# two data checks to make sure data looks like it loaded ok
+summary(dat)
+glimpse(dat)
+
+# load meta data, including site effort
+# assumes meta data is in the "data" subfolfder, is a csv file called "BCK_2020_Deployment_Data.csv"
+eff <- read.csv(paste("data/",toupper(substr(StudyArea,1,4)),"_",Year,"_Deployment_Data.csv",sep=""), header=T, colClasses=c("character")) %>% type_convert()
+
+summary(eff)
+glimpse(eff)
+
+# adding spatial coordinates from the call data to the meta data
+colnames(dat)[1] <- "Site" # need to have columns named the same in both files for the match
+eff$Latitude <- dat$Latitude[match(eff$Site, dat$Site)]
+eff$Longitude <- dat$Longitude[match(eff$Site, dat$Site)]
+eff$utm_zone <- dat$`UTM zone`[match(eff$Site, dat$Site)]
+eff$utm_x <- dat$x_proj[match(eff$Site, dat$Site)]
+eff$utm_y <- dat$y_proj[match(eff$Site, dat$Site)]
+
+eff <- eff[c("Site","Latitude","Longitude","utm_zone","utm_x","utm_y","Start_date","End_date")]
+##############################################################
+##### DATA TESTS #############################################
+##############################################################
+
+# This code will not work unless your data passes the following checks
+
+glimpse(eff) # check for correct loading of data - to see data classes and initial values
+summary(eff) # overview of data and check for NAs
+# check # of UTM zones - if >1 will need to convert lat/long to UTM otherwise stick with utm_x and utm_y
+# check number of "Problem1_from" and "Problem1_to" to see if need to set hasProblems function to "True" or "False"
+# if NA in any column other than "Problem" columns need to fix data
+# if non-numeric in spatial coordiantes, will need to change to numeric
+
+eff$StudyArea <- as.factor(substr(eff$Site,1,3))
+eff %>% count(StudyArea) # 25 sites per study area
+
+# All dates must be in YYYY-MM-DD in 'eff' and YYYY-MM-DD HH:MM:SS in 'dat' 
+# If any of the following return NA, you must change your formatting
+strptime(eff$Start_date[1], "%Y-%m-%d", tz)
+strptime(eff$End_date[1], "%Y-%m-%d", tz)
+strptime(dat$AbsoluteTimeOfEvent[1], "%H:%M:%S", tz)
+
+###--- Add columns for the Dates in POSIX format:
+eff$setup_date <- as.POSIXct(strptime(eff$Start_date, "%Y-%m-%d", tz))
+eff$retrieval_date <- as.POSIXct(strptime(eff$End_date, "%Y-%m-%d", tz))
+
+eff %>% group_by(StudyArea) %>% summarise(min(setup_date), max(setup_date), 
+                                          min(retrieval_date), max(retrieval_date))
+difftime(eff$retrieval_date, eff$setup_date, units="days") # checks the number of nights survyed in "day" units
+
+###--- Add columns for the Date/Time in POSIX format
+dat <- dat[complete.cases(dat),]
+
+dat$Datep <- as.POSIXct(strptime(dat$SurveyNight, "%Y%m%d", tz)) # pre-processed so that each Datep corresponds to a survey night (i.e., dusk to dawn)
+dat$Timep <- as.POSIXct(strptime(dat$AbsoluteTimeOfEvent, "%H:%M:%S", tz))
+dat$Timep <- strftime(dat$Timep, "%H:%M:%S")
+glimpse(dat)
+unique(dat$`UTM zone`)
+sum(is.na(dat$Datep)) # if >0 then NAs in dataset, will want to check, might just mean sites without koala data
+
+
+# If all of the above is satisfied -> press 'Knit' above ^
+
+# ### if need to change utm to same zone, use this code and then 'Knit'
+# # Setting existing coordinate as lat-long system
+# cord.dec = SpatialPoints(cbind(eff$Longitude, eff$Latitude), proj4string = CRS("+proj=longlat"))
+# # Transforming coordinate to UTM using:
+# # https://epsg.io/28356
+# # EPSG 28356, GDA94, UTM Zone=56
+# # alt is (EPSG=28355 for GDA94, UTM Zone=55)
+# 
+# # create coordinates and convert lat long to utm
+# cord.UTM <- spTransform(cord.dec, CRS("+init=epsg:28356"))
+# # coordinates(cord.UTM)
+# 
+# eff$utm_x <- coordinates(cord.UTM)[,1]
+# eff$utm_y <- coordinates(cord.UTM)[,2]
+
+```
+
+```{r non-adjustable options, echo=F, include=F}
+
+# Calculate the number of nights each deployment was active, add 1 to ensure all nights including
+eff$Days <- as.numeric(round(difftime(eff$retrieval_date, eff$setup_date, units="days"),1)+1)
+
+# Count the total number of ARU stations
+n.stat <- length(unique(eff$Site))
+
+# Generate colours to display the category levels - R needs them as a factor
+eff[,category] <- factor(eff[,category])
+col.cat <- wheel(colour, num = length(levels(eff[,category])))
+eff$Cols <- col.cat[eff[,category]]
+
+# Code to determine how large the figures will be (we need larger figures if we have more sites)
+eff.height <- 7
+
+###--- Create sitedf
+sitedf <- eff %>% select(StudyArea, Site, utm_x, utm_y, setup_date, retrieval_date)
+summary(sitedf)
+
+###--- Detector location operability matrix
+# issues with detop matrix if hasProblems is TRUE unless all stations have issues
+# if not all stations had issues, must instead truncate the set_up date or retrieval_date 
+# to account for stations without data - if night has partial data, consider it missing
+detop <- cameraOperation(sitedf,
+                         stationCol = "Site", 
+                         setupCol = "setup_date", 
+                         retrievalCol = "retrieval_date", 
+                         hasProblems = FALSE,     # check this as will depend on dataset
+                         dateFormat = "%Y-%m-%d", 
+                         writecsv = FALSE,
+                         outDir = getwd())
+
+dim(detop) # locations x nights
+colnames(detop)
+row.names(detop)
+
+sum(detop, na.rm=TRUE) # number ARU nights for site
+detop[is.na(detop)] <- 0
+```
+
+## `r StudyArea` Study Area
+
+### ARU locations
+
+At `r StudyArea` ARUs were deployed at `r n.stat` unique locations.
+
+```{r map, echo=F}
+
+m <- leaflet() %>%
+  addProviderTiles(providers$Esri.WorldImagery, group="Satellite") %>%  # Add satellite data
+  addProviderTiles(providers$Esri.WorldTopoMap, group="Base") %>%     
+  addCircleMarkers(lng=eff$Longitude, lat=eff$Latitude,
+                   color=eff$Cols,
+                   popup=paste(eff$Site, eff[,category])) %>%
+ addLegend("topleft", colors = col.cat,  labels = levels(eff[,category]),
+    title = category,
+    labFormat = labelFormat(prefix = "$"),
+    opacity = 1
+  ) %>%
+  # Layers control
+  addLayersControl(
+    baseGroups = c("Satellite", "Base"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+m
+
+mapshot(m, file = paste("./out/SpatialVisualisation_",StudyArea,"_",Year,".png", sep=""))
+
+```
+
+### ARU activity through time
+
+The `r n.stat` sites have resulted in a total of `r as.character(round(sum(eff$Days, na.rm=T),0))` ARU nights (mean = `r round(mean(aggregate(Days~Site, data=eff,  FUN=sum, na.rm=T)$Days),1)` nights per site; min = `r round(min(aggregate(Days~Site, data=eff,  FUN=sum, na.rm=T)$Days),1)`; max = `r round(max(aggregate(Days~Site, data=eff,  FUN=sum, na.rm=T)$Days),1)`).The nightly break down of ARU activity is as follows:
+
+```{r ARU activity, echo=F, fig.height=eff.height}
+
+# Adjust layout
+par(mar=c(2,5,1,1))
+plot(c(min(eff$setup_date, na.rm=T), max(eff$retrieval_date, na.rm=T)), c(1,n.stat), las=1, ylab="", xlab="", type="n", yaxt="n")
+
+axis(2, at= 1:n.stat, labels= unique(eff$Site), las=1, cex.axis=0.4)
+#mtext("Site", 2, 4)
+# Make lines for each of the ARUs
+for(i in 1:length(unique(eff$Site)))
+{
+  abline(h=i, col=rgb(0,0,0,0.1))
+  tmp <- eff[eff$Site==unique(eff$Site)[i],]
+  for(j in 1:nrow(tmp))
+    {
+      lines(c(tmp$setup_date[j],
+                       tmp$retrieval_date[j]),
+            c(i,i), lwd=2)
+    }
+
+}
+
+
+# ### detector operation schedule in the form of an image plot
+# #from scrbook, or directly create function:
+# 
+# rot <- function (m)
+# {
+#   nr <- nrow(m)
+#   nc <- ncol(m)
+#   v <- matrix(NA, nrow = nc, ncol = nr)
+#   for (i in 1:nr) {
+#     v[, nr - (i - 1)] <- m[i, ]
+#   }
+#   v
+# }
+# 
+# oper <- detop
+# oper[is.na(oper)] <- 0
+# # dark blue is not operational and light blue is operational
+# image(1:ncol(oper),1:nrow(oper),rot(oper), xlab="Survey Night", ylab="Number of Sites",col=topo.colors(2))
+
+```
+
+Black lines denote an ARU which is active, white space indicates ARUs which are inactive. 
+
+```{r detections, echo=F, include=F}
+# dat$Site <- as.factor(dat$`Site Name`)
+dat2 <- dat %>% dplyr::select(Site, Datep) %>% drop_na() # removes any rows with NA
+# dat2 <- dat %>% dplyr::select(Site, Datep, Timep)# %>% drop_na() # removes any rows with NA
+
+# check total number of records per species and for each year
+dat2$count <- 1 #create a count of 1 for each record
+
+dat2$Species <- as.factor(c("Koala")) # to create a matrix of koala detections
+dat2$StudyArea <- as.factor(substr(dat2$Site,1,3))
+
+occDate <- lubridate::ymd(as.vector(colnames(detop)))
+
+counts.df <- as.data.frame(sitedf$Site)
+colnames(counts.df) <- "Site"
+
+get_occCount <- function(occDate){
+  occCount <-dat2 %>% filter(Datep==occDate) %>% group_by(Site) %>% summarise(sum(count))
+  return(occCount)
+}
+
+for(i in 1:length(occDate)){
+  counts.df <- left_join(counts.df,get_occCount(occDate[i]), by="Site")
+}
+
+Kmatrix <- as.matrix(counts.df[,2:ncol(counts.df)])
+row.names(Kmatrix) <- counts.df[,1]
+colnames(Kmatrix) <- as.character(occDate)
+
+(dat2 %>% summarise(sum(count))- sum(Kmatrix, na.rm = TRUE)) # if 0 then worked
+
+Kmatrix[is.na(Kmatrix)] <- 0
+sum(Kmatrix)
+nrow(dat2)
+```
+
+### Koala calls summarised
+
+Spatial visualisation of koala calls per site, with black filled circles scaled to the number of calls detected.
+
+``` {r spatial visulation, echo=F, fig.height=(eff.height-2), fig.width=(eff.height-2)}
+koala.map <- detectionMaps(CTtable = sitedf,
+                            recordTable = as.data.frame(dat2),
+                            Xcol = "utm_x",
+                            Ycol = "utm_y",
+                            stationCol = "Site",
+                            speciesCol = "Species",
+                            writePNG = FALSE,
+                            plotDirectory = getwd(),
+                            plotR = TRUE,
+                            printLabels = FALSE,
+                            richnessPlot = FALSE,
+                            addLegend = FALSE)
+
+
+
+```
+
+
+``` {r detection summaries, echo=F, fig.height = (eff.height-1)}
+
+# table with # records per site
+# as.data.frame(dat2 %>% group_by(Site) %>% summarise(`Call Count` = sum(count))) 
+
+barplot(rowSums(Kmatrix), las=2, ylab="Call Count", main="Koala Calls per Site")
+
+# a table with # records per night
+# as.data.frame(dat2 %>% group_by(`Survey Night` = Datep) %>% 
+#                 summarise(`Call Count` = sum(count)))
+
+barplot(colSums(Kmatrix), las=2, ylab="Call Count", main="Koala Calls per Night") 
+
+```
+
+```{r SC modelling, echo=F, include=F}
+oper <- as.matrix(detop)
+dim(oper) # operability matrix; site (j) by sampling occassion (k)
+
+traplocs <- sitedf[c("utm_x","utm_y")]           # number detector locations in this matrix
+colnames (traplocs) <- c("x","y")
+str(traplocs)
+
+n <- as.matrix(Kmatrix)
+sum(is.na(n)) 
+sum(n,na.rm=T)
+dim(n) 
+
+###---- detector site coordinates
+summary(traplocs)
+
+# specify how much to buffer sites by (in 100 m units, according to coord.scale)
+coord.scale <- 100
+buffer <- 7.5 # 750 m unit buffer - 3*sigma
+
+traplocs <- as.matrix(traplocs)           
+X <- traplocs/coord.scale            
+dim(X)
+
+###--- create xlims and ylims of scaled coordinates
+X.scaled <- X[,1]-min(X[,1])
+
+Xl.scaled <- min(X.scaled - buffer)
+Xu.scaled <- max(X.scaled + buffer)
+
+Y.scaled <- X[,2]-min(X[,2])
+Yl.scaled <- min(Y.scaled - buffer)
+Yu.scaled <- max(Y.scaled + buffer)
+
+xlims.scaled <- c(Xl.scaled,Xu.scaled); ylims.scaled <- c(Yl.scaled,Yu.scaled)
+xlims.scaled
+ylims.scaled
+
+areaha.scaled <- (Xu.scaled - Xl.scaled)*(Yu.scaled - Yl.scaled)
+areaha.scaled 
+
+X2 <- as.matrix(cbind(X.scaled,Y.scaled))
+dim(X2) # scaled traploc matrix in 100 m units
+
+dat <- list(n=n, X=X2, M=500, J=nrow(n), K=ncol(n),
+            xlim=xlims.scaled, ylim=ylims.scaled, area=areaha.scaled,
+            oper=oper, sitedf = sitedf)
+
+save(dat, file=paste("./out/",StudyArea,"_",Year,"_dat.RData", sep=""))
+
+```
+
+
+### Koala data prepped for `r StudyArea` study area spatial count modelling
+
+For the `r dim(detop)[1]` sites recording koala calls over `r dim(detop)[2]` nights, ARUs were operational for `r sum(oper)` nights and `r sum(n)` calls were detected. Spatial count modelling is set to run with a data augmented (M) population of `r dat$M` individuals over a study area of `r round(areaha.scaled,0)` ha (a rectangle around the ARUs buffered by `r buffer*coord.scale` m).
+
+
